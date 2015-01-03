@@ -60,7 +60,10 @@ public class LinuxGLContext extends GLContext {
 		if ( glXGetCurrentDisplay == NULL )
 			throw new OpenGLException("Failed to retrieve glXGetCurrentDisplay function address.");
 
-		return createFromCurrent(nglXGetCurrentDisplay(glXGetCurrentDisplay));
+                long display = nglXGetCurrentDisplay(glXGetCurrentDisplay);
+                if ( display == NULL )
+                        throw new IllegalStateException("Unable to retrieve the current Display");
+		return createFromCurrent(display);
 	}
 
 	public static LinuxGLContext createFromCurrent(long display) {

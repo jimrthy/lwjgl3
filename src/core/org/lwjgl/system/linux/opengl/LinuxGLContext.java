@@ -55,12 +55,21 @@ public class LinuxGLContext extends GLContext {
 		return glXGetCurrentContext() == ctx;
 	}
 
-	public static LinuxGLContext createFromCurrent() {
+        public static long currentDisplayGetter() {
 		long glXGetCurrentDisplay = GL.getFunctionProvider().getFunctionAddress("glXGetCurrentDisplay");
 		if ( glXGetCurrentDisplay == NULL )
 			throw new OpenGLException("Failed to retrieve glXGetCurrentDisplay function address.");
+                return glXGetCurrentDisplay;
+        }
 
-		return createFromCurrent(nglXGetCurrentDisplay(glXGetCurrentDisplay));
+	public static LinuxGLContext createFromCurrent() {
+                long glXGetCurrentDisplay = currentDisplayGetter();
+                System.out.printf("Display Retriever at %x\n", glXGetCurrentDisplay);
+
+                long display = nglXGetCurrentDisplay(glXGetCurrentDisplay);
+                if ( display == NULL )
+                        throw new IllegalStateException("Missing Display");
+		return createFromCurrent(display);
 	}
 
 	public static LinuxGLContext createFromCurrent(long display) {

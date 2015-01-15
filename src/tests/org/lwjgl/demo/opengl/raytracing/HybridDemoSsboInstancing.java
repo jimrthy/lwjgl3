@@ -25,6 +25,7 @@ import static org.lwjgl.opengl.GL11.*;
 import static org.lwjgl.opengl.GL15.*;
 import static org.lwjgl.opengl.GL20.*;
 import static org.lwjgl.opengl.GL30.*;
+import static org.lwjgl.opengl.GL31.*;
 import static org.lwjgl.opengl.GL33.*;
 import static org.lwjgl.opengl.GL42.*;
 import static org.lwjgl.opengl.GL43.*;
@@ -35,27 +36,19 @@ import static org.lwjgl.system.MemoryUtil.*;
  * This demo is used to showcase hybrid rasterization and ray tracing to make
  * the first bounce faster.
  * <p>
- * The idea behind this is not new, others have done it, too, like in <a
- * href="https://www.youtube.com/watch?v=LyH4yBm6Z9g">Hybrid Rendering Demo -
- * PowerVR Ray Tracing - GDC 2014</a>.
- * <p>
- * The benefit of doing it this way is to use the rasterizer to rasterize the
- * depth/view position and normal information of a potentially complex model
- * first, storing it in a A-buffer. This essentially saves us one bounce of path
- * tracing for the first hit of the eye ray into the scene.
- * <p>
- * From there on we can use the ray tracer again and compute shadow rays and
- * reflection rays as usual.
+ * It works like the {@link HybridDemoSsbo}, but uses hardware instancing to
+ * rasterize the boxes. It won't be any faster, but will use less GPU memory as
+ * we only need to create a small VBO containing a unit axis-aligned box and a
+ * buffer with per-instance box data (position and size).
  * 
  * @author Kai Burjack
  */
-public class HybridDemo {
+public class HybridDemoSsboInstancing {
 
-	private static Vector3f[] boxes = { new Vector3f(-5.0f, -0.1f, -5.0f), new Vector3f(5.0f, 0.0f, 5.0f),
-			new Vector3f(-0.5f, 0.0f, -0.5f), new Vector3f(0.5f, 1.0f, 0.5f), new Vector3f(-5.1f, 0.0f, -5.0f),
-			new Vector3f(-5.0f, 5.0f, 5.0f), new Vector3f(5.0f, 0.0f, -5.0f), new Vector3f(5.1f, 5.0f, 5.0f),
-			new Vector3f(-5.0f, 0.0f, -5.1f), new Vector3f(5.0f, 5.0f, -5.0f), new Vector3f(-5.0f, 0.0f, 5.0f),
-			new Vector3f(5.0f, 5.0f, 5.1f), new Vector3f(-5.0f, 5.0f, -5.0f), new Vector3f(5.0f, 5.1f, 5.0f) };
+	/**
+	 * The boxes for both rasterization and ray tracing.
+	 */
+	private static Vector3f[] boxes = Scene.boxes;
 
 	private long window;
 	private int width = 1024;
@@ -72,6 +65,7 @@ public class HybridDemo {
 	private int vaoScene;
 	private int positionTexture;
 	private int normalTexture;
+	private int ssbo;
 	private int sampler;
 
 	private int eyeUniform;
@@ -82,6 +76,7 @@ public class HybridDemo {
 	private int timeUniform;
 	private int blendFactorUniform;
 	private int bounceCountUniform;
+	private int boxesSsboBinding;
 	private int framebufferImageBinding;
 	private int worldPositionImageBinding;
 	private int worldNormalImageBinding;
@@ -156,7 +151,8 @@ public class HybridDemo {
 		glfwWindowHint(GLFW_VISIBLE, GL_FALSE);
 		glfwWindowHint(GLFW_RESIZABLE, GL_TRUE);
 
-		window = glfwCreateWindow(width, height, "Raytracing Demo (compute shader + raster)", NULL, NULL);
+		window = glfwCreateWindow(width, height,
+				"Raytracing Demo - compute shader (with SSBO) + raster (with instancing)", NULL, NULL);
 		if (window == NULL) {
 			throw new AssertionError("Failed to create the GLFW window");
 		}
@@ -172,18 +168,18 @@ public class HybridDemo {
 				if (key == GLFW_KEY_ESCAPE) {
 					glfwSetWindowShouldClose(window, GL_TRUE);
 				} else if (key == GLFW_KEY_KP_ADD || key == GLFW_KEY_PAGE_UP) {
-					int newBounceCount = Math.min(4, HybridDemo.this.bounceCount + 1);
-					if (newBounceCount != HybridDemo.this.bounceCount) {
-						HybridDemo.this.bounceCount = newBounceCount;
-						System.out.println("Ray bounce count is now: " + HybridDemo.this.bounceCount);
-						HybridDemo.this.frameNumber = 0;
+					int newBounceCount = Math.min(4, HybridDemoSsboInstancing.this.bounceCount + 1);
+					if (newBounceCount != HybridDemoSsboInstancing.this.bounceCount) {
+						HybridDemoSsboInstancing.this.bounceCount = newBounceCount;
+						System.out.println("Ray bounce count is now: " + HybridDemoSsboInstancing.this.bounceCount);
+						HybridDemoSsboInstancing.this.frameNumber = 0;
 					}
 				} else if (key == GLFW_KEY_KP_SUBTRACT || key == GLFW_KEY_PAGE_DOWN) {
-					int newBounceCount = Math.max(1, HybridDemo.this.bounceCount - 1);
-					if (newBounceCount != HybridDemo.this.bounceCount) {
-						HybridDemo.this.bounceCount = newBounceCount;
-						System.out.println("Ray bounce count is now: " + HybridDemo.this.bounceCount);
-						HybridDemo.this.frameNumber = 0;
+					int newBounceCount = Math.max(1, HybridDemoSsboInstancing.this.bounceCount - 1);
+					if (newBounceCount != HybridDemoSsboInstancing.this.bounceCount) {
+						HybridDemoSsboInstancing.this.bounceCount = newBounceCount;
+						System.out.println("Ray bounce count is now: " + HybridDemoSsboInstancing.this.bounceCount);
+						HybridDemoSsboInstancing.this.frameNumber = 0;
 					}
 				}
 			}
@@ -192,11 +188,13 @@ public class HybridDemo {
 		glfwSetFramebufferSizeCallback(window, fbCallback = new GLFWFramebufferSizeCallback() {
 			@Override
 			public void invoke(long window, int width, int height) {
-				if (width > 0 && height > 0 && (HybridDemo.this.width != width || HybridDemo.this.height != height)) {
-					HybridDemo.this.width = width;
-					HybridDemo.this.height = height;
-					HybridDemo.this.resetFramebuffer = true;
-					HybridDemo.this.frameNumber = 0;
+				if (width > 0
+						&& height > 0
+						&& (HybridDemoSsboInstancing.this.width != width || HybridDemoSsboInstancing.this.height != height)) {
+					HybridDemoSsboInstancing.this.width = width;
+					HybridDemoSsboInstancing.this.height = height;
+					HybridDemoSsboInstancing.this.resetFramebuffer = true;
+					HybridDemoSsboInstancing.this.frameNumber = 0;
 				}
 			}
 		});
@@ -204,9 +202,9 @@ public class HybridDemo {
 		glfwSetCursorPosCallback(window, cpCallback = new GLFWCursorPosCallback() {
 			@Override
 			public void invoke(long window, double x, double y) {
-				HybridDemo.this.mouseX = (float) x;
+				HybridDemoSsboInstancing.this.mouseX = (float) x;
 				if (mouseDown) {
-					HybridDemo.this.frameNumber = 0;
+					HybridDemoSsboInstancing.this.frameNumber = 0;
 				}
 			}
 		});
@@ -215,11 +213,11 @@ public class HybridDemo {
 			@Override
 			public void invoke(long window, int button, int action, int mods) {
 				if (action == GLFW_PRESS) {
-					HybridDemo.this.mouseDownX = HybridDemo.this.mouseX;
-					HybridDemo.this.mouseDown = true;
+					HybridDemoSsboInstancing.this.mouseDownX = HybridDemoSsboInstancing.this.mouseX;
+					HybridDemoSsboInstancing.this.mouseDown = true;
 				} else if (action == GLFW_RELEASE) {
-					HybridDemo.this.mouseDown = false;
-					HybridDemo.this.rotationAboutY = HybridDemo.this.currRotationAboutY;
+					HybridDemoSsboInstancing.this.mouseDown = false;
+					HybridDemoSsboInstancing.this.rotationAboutY = HybridDemoSsboInstancing.this.currRotationAboutY;
 				}
 			}
 		});
@@ -236,6 +234,7 @@ public class HybridDemo {
 		createSampler();
 		createRasterizerTextures();
 		createRasterFrameBufferObject();
+		createSceneSSBO();
 		createFullScreenVao();
 		createSceneVao();
 		createRasterProgram();
@@ -259,6 +258,33 @@ public class HybridDemo {
 		camera = new Camera();
 
 		firstTime = System.nanoTime();
+	}
+
+	/**
+	 * Create a Shader Storage Buffer Object which will hold our boxes to be
+	 * read by our Compute Shader.
+	 */
+	private void createSceneSSBO() {
+		this.ssbo = glGenBuffers();
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, ssbo);
+		ByteBuffer ssboData = BufferUtils.createByteBuffer(4 * (4 + 4) * boxes.length / 2);
+		FloatBuffer fv = ssboData.asFloatBuffer();
+		for (int i = 0; i < boxes.length; i += 2) {
+			Vector3f min = boxes[i];
+			Vector3f max = boxes[i + 1];
+			/*
+			 * NOTE: We need to write vec4 here, because SSBOs have specific
+			 * alignment requirements for struct members (vec3 is always treated
+			 * as vec4 in memory!)
+			 * 
+			 * See:
+			 * "https://www.safaribooksonline.com/library/view/opengl-programming-guide/9780132748445/app09lev1sec3.html"
+			 */
+			fv.put(min.x).put(min.y).put(min.z).put(0.0f);
+			fv.put(max.x).put(max.y).put(max.z).put(0.0f);
+		}
+		glBufferData(GL_SHADER_STORAGE_BUFFER, ssboData, GL_STATIC_DRAW);
+		glBindBuffer(GL_SHADER_STORAGE_BUFFER, 0);
 	}
 
 	/**
@@ -289,79 +315,95 @@ public class HybridDemo {
 	 */
 	private void createSceneVao() {
 		int vao = glGenVertexArrays();
+
+		/* Create vertex data */
 		int vbo = glGenBuffers();
 		glBindVertexArray(vao);
 		glBindBuffer(GL_ARRAY_BUFFER, vbo);
-		ByteBuffer bb = BufferUtils.createByteBuffer(boxes.length * 4 * (3 + 3) * 6 * 6);
+		ByteBuffer bb = BufferUtils.createByteBuffer(4 * (3 + 3) * 6 * 6);
 		FloatBuffer fv = bb.asFloatBuffer();
-		for (int i = 0; i < boxes.length; i += 2) {
-			triangulateBox(boxes[i], boxes[i + 1], fv);
-		}
+		triangulateUnitBox(fv);
 		glBufferData(GL_ARRAY_BUFFER, bb, GL_STATIC_DRAW);
 		glEnableVertexAttribArray(0);
 		glVertexAttribPointer(0, 3, GL_FLOAT, false, 4 * (3 + 3), 0L);
 		glEnableVertexAttribArray(1);
 		glVertexAttribPointer(1, 3, GL_FLOAT, false, 4 * (3 + 3), 4 * 3);
 		glBindBuffer(GL_ARRAY_BUFFER, 0);
+
+		/* Create per instance data (position and size of box) */
+		int ivbo = glGenBuffers();
+		glBindBuffer(GL_ARRAY_BUFFER, ivbo);
+		bb = BufferUtils.createByteBuffer(4 * (3 + 3) * boxes.length);
+		fv = bb.asFloatBuffer();
+		for (int i = 0; i < boxes.length; i += 2) {
+			Vector3f min = boxes[i];
+			Vector3f max = boxes[i + 1];
+			fv.put((max.x + min.x) / 2.0f).put((max.y + min.y) / 2.0f).put((max.z + min.z) / 2.0f);
+			fv.put((max.x - min.x) / 2.0f).put((max.y - min.y) / 2.0f).put((max.z - min.z) / 2.0f);
+		}
+		glBufferData(GL_ARRAY_BUFFER, bb, GL_STATIC_DRAW);
+		glEnableVertexAttribArray(2);
+		glVertexAttribPointer(2, 3, GL_FLOAT, false, 4 * (3 + 3), 0L);
+		glVertexAttribDivisor(2, 1);
+		glEnableVertexAttribArray(3);
+		glVertexAttribPointer(3, 3, GL_FLOAT, false, 4 * (3 + 3), 4 * 3);
+		glVertexAttribDivisor(3, 1);
+		glBindBuffer(GL_ARRAY_BUFFER, 0);
 		glBindVertexArray(0);
 		this.vaoScene = vao;
 	}
 
 	/**
-	 * Write the vertices (position and normal) of an axis-aligned box with the
-	 * given corner coordinates into the provided {@link FloatBuffer}.
+	 * Write the vertices (position and normal) of an axis-aligned unit box into
+	 * the provided {@link FloatBuffer}.
 	 * 
-	 * @param min
-	 *            the min corner
-	 * @param max
-	 *            the max corner
 	 * @param fv
 	 *            the {@link FloatBuffer} receiving the vertex position and
 	 *            normal
 	 */
-	private static void triangulateBox(Vector3f min, Vector3f max, FloatBuffer fv) {
+	private static void triangulateUnitBox(FloatBuffer fv) {
 		/* Front face */
-		fv.put(min.x).put(min.y).put(max.z).put(0.0f).put(0.0f).put(1.0f);
-		fv.put(max.x).put(min.y).put(max.z).put(0.0f).put(0.0f).put(1.0f);
-		fv.put(max.x).put(max.y).put(max.z).put(0.0f).put(0.0f).put(1.0f);
-		fv.put(max.x).put(max.y).put(max.z).put(0.0f).put(0.0f).put(1.0f);
-		fv.put(min.x).put(max.y).put(max.z).put(0.0f).put(0.0f).put(1.0f);
-		fv.put(min.x).put(min.y).put(max.z).put(0.0f).put(0.0f).put(1.0f);
+		fv.put(-1.0f).put(-1.0f).put(1.0f).put(0.0f).put(0.0f).put(1.0f);
+		fv.put(1.0f).put(-1.0f).put(1.0f).put(0.0f).put(0.0f).put(1.0f);
+		fv.put(1.0f).put(1.0f).put(1.0f).put(0.0f).put(0.0f).put(1.0f);
+		fv.put(1.0f).put(1.0f).put(1.0f).put(0.0f).put(0.0f).put(1.0f);
+		fv.put(-1.0f).put(1.0f).put(1.0f).put(0.0f).put(0.0f).put(1.0f);
+		fv.put(-1.0f).put(-1.0f).put(1.0f).put(0.0f).put(0.0f).put(1.0f);
 		/* Back face */
-		fv.put(max.x).put(min.y).put(min.z).put(0.0f).put(0.0f).put(-1.0f);
-		fv.put(min.x).put(min.y).put(min.z).put(0.0f).put(0.0f).put(-1.0f);
-		fv.put(min.x).put(max.y).put(min.z).put(0.0f).put(0.0f).put(-1.0f);
-		fv.put(min.x).put(max.y).put(min.z).put(0.0f).put(0.0f).put(-1.0f);
-		fv.put(max.x).put(max.y).put(min.z).put(0.0f).put(0.0f).put(-1.0f);
-		fv.put(max.x).put(min.y).put(min.z).put(0.0f).put(0.0f).put(-1.0f);
+		fv.put(1.0f).put(-1.0f).put(-1.0f).put(0.0f).put(0.0f).put(-1.0f);
+		fv.put(-1.0f).put(-1.0f).put(-1.0f).put(0.0f).put(0.0f).put(-1.0f);
+		fv.put(-1.0f).put(1.0f).put(-1.0f).put(0.0f).put(0.0f).put(-1.0f);
+		fv.put(-1.0f).put(1.0f).put(-1.0f).put(0.0f).put(0.0f).put(-1.0f);
+		fv.put(1.0f).put(1.0f).put(-1.0f).put(0.0f).put(0.0f).put(-1.0f);
+		fv.put(1.0f).put(-1.0f).put(-1.0f).put(0.0f).put(0.0f).put(-1.0f);
 		/* Left face */
-		fv.put(min.x).put(min.y).put(min.z).put(-1.0f).put(0.0f).put(0.0f);
-		fv.put(min.x).put(min.y).put(max.z).put(-1.0f).put(0.0f).put(0.0f);
-		fv.put(min.x).put(max.y).put(max.z).put(-1.0f).put(0.0f).put(0.0f);
-		fv.put(min.x).put(max.y).put(max.z).put(-1.0f).put(0.0f).put(0.0f);
-		fv.put(min.x).put(max.y).put(min.z).put(-1.0f).put(0.0f).put(0.0f);
-		fv.put(min.x).put(min.y).put(min.z).put(-1.0f).put(0.0f).put(0.0f);
+		fv.put(-1.0f).put(-1.0f).put(-1.0f).put(-1.0f).put(0.0f).put(0.0f);
+		fv.put(-1.0f).put(-1.0f).put(1.0f).put(-1.0f).put(0.0f).put(0.0f);
+		fv.put(-1.0f).put(1.0f).put(1.0f).put(-1.0f).put(0.0f).put(0.0f);
+		fv.put(-1.0f).put(1.0f).put(1.0f).put(-1.0f).put(0.0f).put(0.0f);
+		fv.put(-1.0f).put(1.0f).put(-1.0f).put(-1.0f).put(0.0f).put(0.0f);
+		fv.put(-1.0f).put(-1.0f).put(-1.0f).put(-1.0f).put(0.0f).put(0.0f);
 		/* Right face */
-		fv.put(max.x).put(min.y).put(max.z).put(1.0f).put(0.0f).put(0.0f);
-		fv.put(max.x).put(min.y).put(min.z).put(1.0f).put(0.0f).put(0.0f);
-		fv.put(max.x).put(max.y).put(min.z).put(1.0f).put(0.0f).put(0.0f);
-		fv.put(max.x).put(max.y).put(min.z).put(1.0f).put(0.0f).put(0.0f);
-		fv.put(max.x).put(max.y).put(max.z).put(1.0f).put(0.0f).put(0.0f);
-		fv.put(max.x).put(min.y).put(max.z).put(1.0f).put(0.0f).put(0.0f);
+		fv.put(1.0f).put(-1.0f).put(1.0f).put(1.0f).put(0.0f).put(0.0f);
+		fv.put(1.0f).put(-1.0f).put(-1.0f).put(1.0f).put(0.0f).put(0.0f);
+		fv.put(1.0f).put(1.0f).put(-1.0f).put(1.0f).put(0.0f).put(0.0f);
+		fv.put(1.0f).put(1.0f).put(-1.0f).put(1.0f).put(0.0f).put(0.0f);
+		fv.put(1.0f).put(1.0f).put(1.0f).put(1.0f).put(0.0f).put(0.0f);
+		fv.put(1.0f).put(-1.0f).put(1.0f).put(1.0f).put(0.0f).put(0.0f);
 		/* Top face */
-		fv.put(min.x).put(max.y).put(max.z).put(0.0f).put(1.0f).put(0.0f);
-		fv.put(max.x).put(max.y).put(max.z).put(0.0f).put(1.0f).put(0.0f);
-		fv.put(max.x).put(max.y).put(min.z).put(0.0f).put(1.0f).put(0.0f);
-		fv.put(max.x).put(max.y).put(min.z).put(0.0f).put(1.0f).put(0.0f);
-		fv.put(min.x).put(max.y).put(min.z).put(0.0f).put(1.0f).put(0.0f);
-		fv.put(min.x).put(max.y).put(max.z).put(0.0f).put(1.0f).put(0.0f);
+		fv.put(-1.0f).put(1.0f).put(1.0f).put(0.0f).put(1.0f).put(0.0f);
+		fv.put(1.0f).put(1.0f).put(1.0f).put(0.0f).put(1.0f).put(0.0f);
+		fv.put(1.0f).put(1.0f).put(-1.0f).put(0.0f).put(1.0f).put(0.0f);
+		fv.put(1.0f).put(1.0f).put(-1.0f).put(0.0f).put(1.0f).put(0.0f);
+		fv.put(-1.0f).put(1.0f).put(-1.0f).put(0.0f).put(1.0f).put(0.0f);
+		fv.put(-1.0f).put(1.0f).put(1.0f).put(0.0f).put(1.0f).put(0.0f);
 		/* Bottom face */
-		fv.put(min.x).put(min.y).put(min.z).put(0.0f).put(-1.0f).put(0.0f);
-		fv.put(max.x).put(min.y).put(min.z).put(0.0f).put(-1.0f).put(0.0f);
-		fv.put(max.x).put(min.y).put(max.z).put(0.0f).put(-1.0f).put(0.0f);
-		fv.put(max.x).put(min.y).put(max.z).put(0.0f).put(-1.0f).put(0.0f);
-		fv.put(min.x).put(min.y).put(max.z).put(0.0f).put(-1.0f).put(0.0f);
-		fv.put(min.x).put(min.y).put(min.z).put(0.0f).put(-1.0f).put(0.0f);
+		fv.put(-1.0f).put(-1.0f).put(-1.0f).put(0.0f).put(-1.0f).put(0.0f);
+		fv.put(1.0f).put(-1.0f).put(-1.0f).put(0.0f).put(-1.0f).put(0.0f);
+		fv.put(1.0f).put(-1.0f).put(1.0f).put(0.0f).put(-1.0f).put(0.0f);
+		fv.put(1.0f).put(-1.0f).put(1.0f).put(0.0f).put(-1.0f).put(0.0f);
+		fv.put(-1.0f).put(-1.0f).put(1.0f).put(0.0f).put(-1.0f).put(0.0f);
+		fv.put(-1.0f).put(-1.0f).put(-1.0f).put(0.0f).put(-1.0f).put(0.0f);
 	}
 
 	/**
@@ -453,12 +495,14 @@ public class HybridDemo {
 	 */
 	private void createRasterProgram() throws IOException {
 		int program = glCreateProgram();
-		int vshader = createShader("demo/raytracing/raster.vs", GL_VERTEX_SHADER);
+		int vshader = createShader("demo/raytracing/rasterInstanced.vs", GL_VERTEX_SHADER);
 		int fshader = createShader("demo/raytracing/raster.fs", GL_FRAGMENT_SHADER);
 		glAttachShader(program, vshader);
 		glAttachShader(program, fshader);
 		glBindAttribLocation(program, 0, "vertexPosition");
 		glBindAttribLocation(program, 1, "vertexNormal");
+		glBindAttribLocation(program, 2, "boxCenter");
+		glBindAttribLocation(program, 3, "boxHalfSize");
 		glBindFragDataLocation(program, 0, "worldPosition_out");
 		glBindFragDataLocation(program, 1, "worldNormal_out");
 		glLinkProgram(program);
@@ -480,7 +524,7 @@ public class HybridDemo {
 	 */
 	private void createComputeProgram() throws IOException {
 		int program = glCreateProgram();
-		int cshader = createShader("demo/raytracing/hybrid.glsl", GL_COMPUTE_SHADER);
+		int cshader = createShader("demo/raytracing/hybridSsbo.glsl", GL_COMPUTE_SHADER);
 		int random = createShader("demo/raytracing/random.glsl", GL_COMPUTE_SHADER);
 		glAttachShader(program, cshader);
 		glAttachShader(program, random);
@@ -533,9 +577,20 @@ public class HybridDemo {
 		timeUniform = glGetUniformLocation(computeProgram, "time");
 		blendFactorUniform = glGetUniformLocation(computeProgram, "blendFactor");
 		bounceCountUniform = glGetUniformLocation(computeProgram, "bounceCount");
+		/* Query the binding point of the SSBO */
+		/*
+		 * First, obtain the "resource index" used for further queries on that
+		 * resource.
+		 */
+		int boxesResourceIndex = glGetProgramResourceIndex(computeProgram, GL_SHADER_STORAGE_BLOCK, "Boxes");
+		IntBuffer props = BufferUtils.createIntBuffer(1);
+		IntBuffer params = BufferUtils.createIntBuffer(1);
+		props.put(0, GL_BUFFER_BINDING);
+		/* Now query the "BUFFER_BINDING" of that resource */
+		glGetProgramResource(computeProgram, GL_SHADER_STORAGE_BLOCK, boxesResourceIndex, props, null, params);
+		boxesSsboBinding = params.get(0);
 
 		/* Query the "image binding point" of the image uniforms */
-		IntBuffer params = BufferUtils.createIntBuffer(1);
 		int loc = glGetUniformLocation(computeProgram, "framebufferImage");
 		glGetUniform(computeProgram, loc, params);
 		framebufferImageBinding = params.get(0);
@@ -660,7 +715,7 @@ public class HybridDemo {
 		glDrawBuffers(2, renderBuffers);
 		glClear(GL_DEPTH_BUFFER_BIT);
 		glBindVertexArray(vaoScene);
-		glDrawArrays(GL_TRIANGLES, 0, 6 * 6 * boxes.length);
+		glDrawArraysInstanced(GL_TRIANGLES, 0, 6 * 6, boxes.length / 2);
 		glBindVertexArray(0);
 		glBindFramebuffer(GL_FRAMEBUFFER, 0);
 		glUseProgram(0);
@@ -703,12 +758,16 @@ public class HybridDemo {
 		glBindImageTexture(worldPositionImageBinding, positionTexture, 0, false, 0, GL_READ_ONLY, GL_RGBA32F);
 		glBindImageTexture(worldNormalImageBinding, normalTexture, 0, false, 0, GL_READ_ONLY, GL_RGBA16F);
 
+		/* Bind the SSBO containing our boxes */
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, boxesSsboBinding, ssbo);
+
 		/* Compute appropriate invocation dimension. */
 		int worksizeX = mathRoundPoT(width);
 		int worksizeY = mathRoundPoT(height);
 
 		/* Invoke the compute shader. */
 		glDispatchCompute(worksizeX / workGroupSizeX, worksizeY / workGroupSizeY, 1);
+
 		/*
 		 * Synchronize all writes to the framebuffer image before we let OpenGL
 		 * source texels from it afterwards when rendering the final image with
@@ -717,6 +776,7 @@ public class HybridDemo {
 		glMemoryBarrier(GL_SHADER_IMAGE_ACCESS_BARRIER_BIT);
 
 		/* Reset bindings. */
+		glBindBufferBase(GL_SHADER_STORAGE_BUFFER, boxesSsboBinding, 0);
 		glBindImageTexture(framebufferImageBinding, 0, 0, false, 0, GL_READ_WRITE, GL_RGBA32F);
 		glBindImageTexture(worldPositionImageBinding, 0, 0, false, 0, GL_READ_ONLY, GL_RGBA32F);
 		glBindImageTexture(worldNormalImageBinding, 0, 0, false, 0, GL_READ_ONLY, GL_RGBA16F);
@@ -744,14 +804,22 @@ public class HybridDemo {
 		glUseProgram(0);
 	}
 
+	/**
+	 * This is the main loop, continuously updating the camera and rendering the
+	 * scene.
+	 */
 	private void loop() {
 		while (glfwWindowShouldClose(window) == GL_FALSE) {
 			glfwPollEvents();
 			glViewport(0, 0, width, height);
 
+			/* Update everything */
 			update();
+			/* Raster the scene */
 			raster();
+			/* Trace the scene */
 			trace();
+			/* Render and present the final image */
 			present();
 
 			glfwSwapBuffers(window);
@@ -780,7 +848,7 @@ public class HybridDemo {
 	}
 
 	public static void main(String[] args) {
-		new HybridDemo().run();
+		new HybridDemoSsboInstancing().run();
 	}
 
 }

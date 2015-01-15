@@ -4,9 +4,9 @@
  */
 #version 430 core
 
-layout(binding = 1, rgba32f) uniform image2D framebufferImage;
-layout(binding = 2, rgba32f) uniform readonly image2D worldPositionImage;
-layout(binding = 3, rgba16f) uniform readonly image2D worldNormalImage;
+layout(binding = 0, rgba32f) uniform image2D framebufferImage;
+layout(binding = 1, rgba32f) uniform readonly image2D worldPositionImage;
+layout(binding = 2, rgba16f) uniform readonly image2D worldNormalImage;
 
 uniform vec3 eye;
 uniform vec3 ray00;
@@ -23,26 +23,12 @@ struct box {
   vec3 max;
 };
 
-#define MAX_SCENE_BOUNDS 100.0
-#define NUM_BOXES 7
-
-const box boxes[] = {
-  /* The ground */
-  {vec3(-5.0, -0.1, -5.0), vec3(5.0, 0.0, 5.0)},
-  /* Box in the middle */
-  {vec3(-0.5, 0.0, -0.5), vec3(0.5, 1.0, 0.5)},
-  /* Left wall */
-  {vec3(-5.1, 0.0, -5.0), vec3(-5.0, 5.0, 5.0)},
-  /* Right wall */
-  {vec3(5.0, 0.0, -5.0), vec3(5.1, 5.0, 5.0)},
-  /* Back wall */
-  {vec3(-5.0, 0.0, -5.1), vec3(5.0, 5.0, -5.0)},
-  /* Front wall */
-  {vec3(-5.0, 0.0, 5.0), vec3(5.0, 5.0, 5.1)},
-  /* Top wall */
-  {vec3(-5.0, 5.0, -5.0), vec3(5.0, 5.1, 5.0)}
+layout (std430, binding = 3) buffer Boxes
+{
+  box[] boxes;
 };
 
+#define MAX_SCENE_BOUNDS 100.0
 #define EPSILON 0.0001
 #define LIGHT_RADIUS 0.4
 #define LIGHT_BASE_INTENSITY 20.0
@@ -81,8 +67,10 @@ vec2 intersectBox(vec3 origin, vec3 dir, const box b) {
 bool intersectBoxes(vec3 origin, vec3 dir, out hitinfo info) {
   float smallest = MAX_SCENE_BOUNDS;
   bool found = false;
-  for (int i = 0; i < NUM_BOXES; i++) {
-    vec2 lambda = intersectBox(origin, dir, boxes[i]);
+  int numBoxes = boxes.length();
+  for (int i = 0; i < numBoxes; i++) {
+    box b = boxes[i];
+    vec2 lambda = intersectBox(origin, dir, b);
     if (lambda.x > 0.0 && lambda.x < lambda.y && lambda.x < smallest) {
       info.near = lambda.x;
       info.far = lambda.y;

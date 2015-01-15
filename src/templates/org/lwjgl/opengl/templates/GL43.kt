@@ -111,9 +111,17 @@ val GL43 = "GL43".nativeClassGL("GL43") {
 		GLenum.IN("format", "the format of the data in memory addressed by {@code data}", PIXEL_DATA_FORMATS),
 		GLenum.IN("type", "the type of the data in memory addressed by {@code data}", PIXEL_DATA_TYPES),
 		mods(
+		  nullable,
 			MultiType(PointerMapping.DATA_SHORT, PointerMapping.DATA_INT, PointerMapping.DATA_FLOAT),
 			const
-		) _ GLvoid_p.IN("data", "a memory location storing the data to be replicated into the buffer's data store")
+		) _ GLvoid_p.IN("data",
+				"""
+		    buffer containing the data to be used as the source of the constant fill value.
+				The elements of data are converted by the GL into the format specified by internalformat,
+				and then used to fill the specified range of the destination buffer.
+				If data is $NULL, then it is ignored and the sub-range of the buffer is filled with zeros.
+				"""
+		)
 	)
 
 	GLvoid.func(
@@ -127,9 +135,17 @@ val GL43 = "GL43".nativeClassGL("GL43") {
 		GLenum.IN("format", "the format of the data in memory addressed by {@code data}", PIXEL_DATA_FORMATS),
 		GLenum.IN("type", "the type of the data in memory addressed by {@code data}", PIXEL_DATA_TYPES),
 		mods(
+			nullable,
 			MultiType(PointerMapping.DATA_SHORT, PointerMapping.DATA_INT, PointerMapping.DATA_FLOAT),
 			const
-		) _ GLvoid_p.IN("data", "a memory location storing the data to be replicated into the buffer's data store")
+		) _ GLvoid_p.IN("data",
+				"""
+		    buffer containing the data to be used as the source of the constant fill value.
+				The elements of data are converted by the GL into the format specified by internalformat,
+				and then used to fill the specified range of the destination buffer.
+				If data is $NULL, then it is ignored and the sub-range of the buffer is filled with zeros.
+				"""
+		)
 	)
 
 	// ARB_compute_shader

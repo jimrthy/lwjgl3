@@ -1,5 +1,14 @@
 /config/ide/idea/.idea/workspace.xml
 /bin
-/generated
+/modules/core/src/generated
 /libs
 /wiki
+.gradle
+.DS_Store
+*.bat
+*.ogg
+*.sh
+*.ttf
+*.wav
+*.zip
+touch.txt

@@ -1,0 +1,34 @@
+<!--
+Copyright LWJGL. All rights reserved.
+License terms: http://lwjgl.org/license.php
+
+Binary assets used in demos are not committed to the git repository.
+This script downloads such assets from S3.
+
+This script is included in /build.xml and depends on /build-definitions.xml
+-->
+<project name="assets" basedir="../" xmlns:if="ant:if" xmlns:unless="ant:unless">
+	<target name="-update-assets" description="Updates the demo assets, if necessary">
+		<uptodate property="refresh-assets" targetfile="${config}/build-assets.xml">
+			<srcfiles dir="${test.resources}/demo" includes="touch.txt"/>
+		</uptodate>
+		<antcall target="update-assets" if:set="refresh-assets"/>
+	</target>
+
+	<target name="update-assets" description="Updates the demo assets">
+		<update-demo-asset path="footsteps.ogg"/>
+		<update-demo-asset path="phero.ogg"/>
+		<get-quiet name="Asset FiraSans" url="https://github.com/google/fonts/raw/master/ofl/firasans/FiraSans-Regular.ttf" dest="${test.resources}/demo/FiraSans.ttf"/>
+		<!-- Add more assets here -->
+
+		<touch file="${test.resources}/demo/touch.txt"/>
+	</target>
+
+	<macrodef name="update-demo-asset">
+		<attribute name="path"/>
+
+		<sequential>
+			<get-quiet name="Asset @{path}" url="http://s3.amazonaws.com/build.lwjgl.org/res/demo/@{path}" dest="${test.resources}/demo/@{path}"/>
+		</sequential>
+	</macrodef>
+</project>

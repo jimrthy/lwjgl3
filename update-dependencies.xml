@@ -1,12 +1,18 @@
+<!--
+Copyright LWJGL. All rights reserved.
+License terms: http://lwjgl.org/license.php
+
+Downloads LWJGL's library dependencies.
+-->
 <project name="LWJGL" basedir="." default="update-dependencies">
 
 	<property name="config" location="config" relative="true"/>
 	<import file="${config}/build-definitions.xml" id="defs"/>
 
 	<!-- *********************************** -->
-	<property name="testng" value="6.8.13"/>
-	<property name="jcommander" value="1.47"/>
-	<property name="kotlinc-build" value="0.10.195"/>
+	<property name="testng" value="6.8.21"/>
+	<property name="jcommander" value="1.48"/>
+	<property name="kotlinc-build" value="1.0.0-beta-1038"/>
 	<!-- *********************************** -->
 
 	<target name="-dependencies-uptodate">
@@ -39,6 +45,7 @@
 	</target>
 
 	<target name="update-dependencies" description="Updates LWJGL dependencies" unless="${build.offline}">
+		<mkdir dir="${lib}"/>
 		<antcall target="-lib-download"/>
 		<antcall target="-kotlinc-download"/>
 	</target>
@@ -48,10 +55,10 @@
 		<local name="kotlinc-archive"/>
 		<property name="kotlinc-archive" value="kotlin-compiler-${kotlinc-build}.zip"/>
 
-		<!-- Delete current build -->
-		<delete dir="${kotlinc}" taskname="kotlinc"/>
 		<!-- Download new build -->
 		<get taskname="kotlinc" src="https://teamcity.jetbrains.com/guestAuth/repository/download/bt345/${kotlinc-build}/${kotlinc-archive}" dest="${lib}" verbose="true"/>
+		<!-- Delete current build -->
+		<delete dir="${kotlinc}" taskname="kotlinc"/>
 		<!-- Extract build -->
 		<unzip src="${lib}/${kotlinc-archive}" dest="${lib}" taskname="kotlinc"/>
 		<!-- Delete build archive -->

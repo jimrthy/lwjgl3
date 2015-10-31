@@ -1,0 +1,68 @@
+<!--
+Copyright LWJGL. All rights reserved.
+License terms: http://lwjgl.org/license.php
+
+Defines which library bindings will be build with LWJGL.
+
+This script is included in /config/build-definitions.xml.
+-->
+<project name="bindings" basedir="../">
+
+	<!-- // ========== BINDING FLAGS ======== // -->
+
+	<property name="binding.stb" value="true"/>
+
+	<property name="binding.glfw" value="true"/>
+
+	<property name="binding.openal" value="true"/>
+	<property name="binding.opencl" value="true"/>
+	<property name="binding.opengl" value="true"/>
+	<property name="binding.opengles" value="true"/>
+
+	<property name="binding.egl" value="true"/>
+
+	<!-- Set the path to the Oculus SDK to enable. -->
+	<property name="OCULUS_SDK_PATH" location="../OculusSDK" relative="false"/>
+
+	<property name="binding.macosx.objc" value="true"/>
+
+	<!-- // ================================ // -->
+
+	<target name="bindings">
+		<condition property="binding.ovr" value="true" else="false">
+			<and>
+				<isset property="OCULUS_SDK_PATH"/>
+				<available file="${OCULUS_SDK_PATH}/LibOVR/Include/OVR_CAPI.h"/>
+			</and>
+		</condition>
+
+		<local name="glfw_opengl_check"/>
+		<condition property="glfw_opengl_check" value="1">
+			<and>
+				<or>
+					<istrue value="${binding.glfw}"/>
+					<istrue value="${binding.ovr}"/>
+				</or>
+				<isfalse value="${binding.opengl}"/>
+			</and>
+		</condition>
+		<fail if="glfw_opengl_check" message="The OpenGL bindings are required"/>
+
+		<local name="bindings.list"/>
+		<script language="javascript">
+			var jvmargs = [];
+
+			var props = LWJGL.getProperties().entrySet().iterator();
+			while ( props.hasNext() ) {
+				var prop = props.next();
+				var name = prop.getKey();
+				if ( name.startsWith("binding.") &amp;&amp; name.indexOf('_') === -1 &amp;&amp; prop.getValue() == "true" )
+					jvmargs.push("-D" + name + "=true");
+			}
+
+			LWJGL.setProperty("bindings.list", jvmargs.join(" "));
+		</script>
+		<property name="bindings" value="${bindings.list}"/>
+	</target>
+
+</project>
